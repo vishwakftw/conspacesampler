@@ -4,7 +4,12 @@ torch.set_default_dtype(torch.float64)
 
 import unittest
 
-from conspacesampler.barriers import BoxBarrier, EllipsoidBarrier, SimplexBarrier
+from conspacesampler.barriers import (
+    BoxBarrier,
+    EllipsoidBarrier,
+    SimplexBarrier,
+    ComposeBarrier,
+)
 from conspacesampler.utils import define_ellipsoid
 
 
@@ -232,6 +237,56 @@ class TestSimplexBarrier(unittest.TestCase):
         for dim in dimensions:
             simplex_barrier = SimplexBarrier(dimension=dim)
             self._test_gradient_inverse_gradient_single(simplex_barrier)
+
+
+class TestComposeBarrier(unittest.TestCase):
+    def setUp(self):
+        self.dim = 43
+        self.barriers = [
+            BoxBarrier(bounds=torch.ones(self.dim)),
+            EllipsoidBarrier(
+                ellipsoid={"eigvals": torch.ones(self.dim), "rot": torch.eye(self.dim)}
+            ),
+        ]
+
+    def test_feasibility(self):
+        # note that the ball is inside the box
+        x = torch.randn(19, self.dim)
+        x = (
+            x
+            / torch.sqrt(torch.sum(torch.square(x), dim=-1, keepdim=True))
+            * torch.rand(1)
+        )
+        my_composed_barrier = ComposeBarrier(self.barriers)
+        self.assertTrue(
+            my_composed_barrier.feasibility(x).all(), "invalid check for feasibility"
+        )
+
+        # consider points outside the ball but inside the box
+        x = torch.empty(self.dim).bernoulli_() * 2 - 1
+        x = x * torch.rand(19, 1) * (self.dim**0.5 - 1) + 1
+        self.assertFalse(
+            my_composed_barrier.feasibility(x).all(), "invalid check for feasibility"
+        )
+
+    def test_hessian(self):
+        x = torch.randn(19, self.dim)
+        x = (
+            x
+            / torch.sqrt(torch.sum(torch.square(x), dim=-1, keepdim=True))
+            * torch.rand(1)
+        )
+        my_composed_barrier = ComposeBarrier(self.barriers)
+        my_hessian = my_composed_barrier.hessian(x=x)
+        manual_hessian = self.barriers[0].hessian(x=x).diag_embed()
+        manual_hessian += self.barriers[1].hessian(x=x)
+        self.assertTrue(
+            torch.allclose(
+                my_hessian,
+                manual_hessian,
+            ),
+            "invalid composed Hessian",
+        )
 
 
 if __name__ == "__main__":
