@@ -22,7 +22,6 @@ def run_sampling(
     run_index: int,
     num_particles: int,
     progress_file: str,
-    loss_progress_file: str,
     debug: bool = False,
     show_tqdm: bool = False,
 ):
@@ -47,7 +46,6 @@ def run_sampling(
     initial_particles += torch.rand(num_particles, dimension) / (12 * dimension) - 1 / (
         24 * dimension
     )
-    require_losses = loss_progress_file != "NA"
 
     if algorithm == "MAPLA":
         dirichlet_sampler = GeneralMAPLASampler(
@@ -64,7 +62,7 @@ def run_sampling(
     particles, rejection_masks = dirichlet_sampler.mix(
         num_iters=num_iters,
         stepsize=stepsize,
-        return_particles=debug or require_losses,
+        return_particles=debug,
         no_progress=not show_tqdm,
     )
     time_end = time()
@@ -115,12 +113,6 @@ if __name__ == "__main__":
         default="progress.txt",
         type=str,
         help="Configuration to store results",
-    )
-    p.add_argument(
-        "--loss_progress_file",
-        default=None,
-        type=str,
-        help="Configuration to store losses computed every few iterations",
     )
     args = p.parse_args()
     args = vars(args)
