@@ -9,6 +9,7 @@ from conspacesampler.barriers import (
     EllipsoidBarrier,
     SimplexBarrier,
     ComposeBarrier,
+    PolytopeBarrier,
 )
 from conspacesampler.utils import define_ellipsoid
 
@@ -237,6 +238,54 @@ class TestSimplexBarrier(unittest.TestCase):
         for dim in dimensions:
             simplex_barrier = SimplexBarrier(dimension=dim)
             self._test_gradient_inverse_gradient_single(simplex_barrier)
+
+
+class TestPolytopeBarrier(unittest.TestCase):
+    def _test_diag_hess_single(self, dim: int):
+        A = torch.empty(dim).bernoulli_() * 2 - 1
+        A *= torch.rand(dim) * 3 + 1
+        b = torch.rand(dim) * 2 - 1
+
+        full_polytope = PolytopeBarrier({"A": torch.diag_embed(A), "b": b})
+        diag_polytope = PolytopeBarrier({"A": A, "b": b})
+
+        x = torch.rand(23, dim) * 2  # feasible points
+        pos_A = A > 0
+        bounds = b / A
+        x[:, pos_A] += bounds[pos_A] - 2
+        x[:, ~pos_A] += bounds[~pos_A]
+
+        y = torch.ones(23, dim)  # infeasible points
+        y[:, pos_A] = bounds[pos_A] + 1
+        y[:, ~pos_A] = bounds[~pos_A] - 1
+
+        for poly in [full_polytope, diag_polytope]:
+            name = "Full" if not poly.diag_hess else "Diag"
+            self.assertTrue(
+                torch.all(poly.feasibility(x)),
+                f"{name} polytope feasibility fail",
+            )
+
+            self.assertFalse(
+                torch.any(poly.feasibility(y)),
+                f"{name} polytope infeasibility fail",
+            )
+
+        self.assertTrue(
+            torch.allclose(full_polytope.value(x), diag_polytope.value(x)),
+            "Value mismatch between diag and full versions",
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                full_polytope.hessian(x), torch.diag_embed(diag_polytope.hessian(x))
+            ),
+            "Hessian mismatch between diag and full versions",
+        )
+
+    def test_diag_hess(self):
+        for dim in [5, 7, 9, 11]:
+            self._test_diag_hess_single(dim=dim)
 
 
 class TestComposeBarrier(unittest.TestCase):

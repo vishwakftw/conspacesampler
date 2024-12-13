@@ -2,7 +2,7 @@ import torch
 
 torch.set_default_dtype(torch.float64)
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 __all__ = [
     "Barrier",
@@ -230,8 +230,8 @@ class EllipsoidBarrier(Barrier):
     def value(self, x: torch.Tensor):
         """
         Computes the value of the potential at x
-        defined as -log(1 - <x, Ax>) * c
-        where A is the ellipsoid and c is the inverse temperature
+        defined as -log(1 - <x, Ax>)
+        where A is the ellipsoid
         """
         inner_product = self._ellipsoid_inner_product(x)
         inner_product[inner_product >= 1] = 0  # points outside or on the boundary
@@ -240,8 +240,8 @@ class EllipsoidBarrier(Barrier):
     def gradient(self, x: torch.Tensor):
         """
         Computes the gradient of the potential at x
-        defined as 2 * c * (Ax) / (1 - <x, Ax>)
-        where A is the ellipsoid and c is the inverse temperature
+        defined as 2 * (Ax) / (1 - <x, Ax>)
+        where A is the ellipsoid
         """
         one_minus_xAx = 1 - self._ellipsoid_inner_product(x)
         # NOTE: when x is too close to the boundary
@@ -260,8 +260,8 @@ class EllipsoidBarrier(Barrier):
         # We did some complicated calculations for the inverse of the function
         # g(x) = x / (1 - <x, Ax>).
         # inv(g)(y) = lambda(y) * y, where lambda(y) = (-1 + sqrt(4<y, Ay> + 1)) / (2<y, Ay>)
-        # we are interested in the inverse of the function h(x) = 2cAx / (1 - <x, Ax>)
-        # note that h(x) = j(g(x)), where j(z) = 2cAz.
+        # we are interested in the inverse of the function h(x) = 2Ax / (1 - <x, Ax>)
+        # note that h(x) = j(g(x)), where j(z) = 2Az.
         # therefore, inv(h)(y) = inv(g)(inv(j)(y))
         # NOTE: if <y, inv(A)y> is too small, or 0, we'll run into numerical issues.
         # so, we're artificially clipping it.
@@ -272,7 +272,7 @@ class EllipsoidBarrier(Barrier):
     def hessian(self, x: torch.Tensor):
         """
         Computes the square root of the Hessian of the potential at x
-        defined as c * (2A / (1 - <x, Ax>) + 4 (Ax)(Ax).T / (1 - <x, Ax>)^2).
+        defined as (2A / (1 - <x, Ax>) + 4 (Ax)(Ax).T / (1 - <x, Ax>)^2).
         This has a nice structure which we could exploit for the square root,
         but not doing it here.
         """
@@ -390,14 +390,23 @@ class PolytopeBarrier(Barrier):
     def __init__(self, polytope: Dict[str, torch.Tensor]):
         self.polytope = polytope
         self.dimension = polytope["A"].shape[-1]
+        if len(polytope["A"].shape) == 1:  # diagonal A
+            self.diag_hess = True
+
+    def _Ax(self, x: torch.Tensor):
+        # functionality to compute Ax for batch of x
+        if not self.diag_hess:
+            return torch.einsum("ij,...j->...i", self.polytope["A"], x)
+        else:
+            return self.polytope["A"] * x
 
     def _safe_slack(self, x: torch.Tensor):
-        vals = torch.einsum("ij,...j->...i", self.polytope["A"], x)
+        vals = self._Ax(x=x)
         return torch.clamp_min(self.polytope["b"] - vals, min=1e-08)
 
     def feasibility(self, x: torch.Tensor):
         return torch.all(
-            torch.einsum("ij,...j->...i", self.polytope["A"], x) <= self.polytope["b"],
+            self._Ax(x=x) <= self.polytope["b"],
             dim=-1,
         )
 
@@ -406,13 +415,19 @@ class PolytopeBarrier(Barrier):
 
     def gradient(self, x: torch.Tensor):
         slack = self._safe_slack(x)  # [b - aTx]
-        return torch.sum(self.polytope["A"] / slack.unsqueeze(-1), dim=-2)
+        if not self.diag_hess:
+            return torch.sum(self.polytope["A"] / slack.unsqueeze(-1), dim=-2)
+        else:
+            return self.polytope["A"] / slack
 
     def hessian(self, x: torch.Tensor):
         slack = self._safe_slack(x)  # [b - aTx]
-        component = self.polytope["A"] / slack.unsqueeze(-1)  # shape n x m x d
-        # component.unsqueeze(-1) * component.unsqueeze(-2) is of shape n x m x d x d
-        return torch.sum(component.unsqueeze(-1) * component.unsqueeze(-2), dim=-3)
+        if not self.diag_hess:
+            component = self.polytope["A"] / slack.unsqueeze(-1)  # shape n x m x d
+            # component.unsqueeze(-1) * component.unsqueeze(-2) is of shape n x m x d x d
+            return torch.sum(component.unsqueeze(-1) * component.unsqueeze(-2), dim=-3)
+        else:
+            return torch.square(self.polytope["A"] / slack)
 
     def inverse_gradient(self, x: torch.Tensor):
         # TODO: this seems hard
