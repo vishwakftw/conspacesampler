@@ -17,7 +17,8 @@ from conspacesampler.utils import define_ellipsoid
 class TestBoxBarrier(unittest.TestCase):
     # Let's test the implementation
     def _test_feasibility_single(self, box_barrier: BoxBarrier):
-        x = box_barrier.sample_uniform(2)[0]
+        x = torch.rand(2, box_barrier.dimension)
+        x = x * (2 * box_barrier.bounds) - box_barrier.bounds
         self.assertTrue(
             torch.all(box_barrier.feasibility(x)), msg=str(box_barrier.feasibility(x))
         )
@@ -38,7 +39,8 @@ class TestBoxBarrier(unittest.TestCase):
 
     def _test_gradient_inverse_gradient_single(self, box_barrier: BoxBarrier):
         for i in range(13):
-            x = box_barrier.sample_uniform(2)[0]
+            x = torch.rand(2, box_barrier.dimension)
+            x = x * (2 * box_barrier.bounds) - box_barrier.bounds
             y = torch.randn(2, box_barrier.dimension)
 
             grad = box_barrier.gradient(x)

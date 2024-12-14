@@ -2,7 +2,8 @@ import torch
 
 torch.set_default_dtype(torch.float64)
 
-from typing import Dict, List
+from typing import Dict, List, Optional
+from .potentials import Potential
 
 __all__ = [
     "Barrier",
@@ -14,39 +15,42 @@ __all__ = [
 ]
 
 
-class Barrier:
+class Barrier(Potential):
     """
-    Base class for Barriers
+    Base class for Barriers.
+    Mathematically, barriers are potentials, and
+    programmatically, we have more characteristics here.
+
+    A barrier is a Legendre type function defined over a
+    specific domain that is convex, closed, and with
+    a non-empty interior.
     """
 
     diag_hess = False
     ZERO = torch.tensor(0.0)
 
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def feasibility(self, x: torch.Tensor):
-        """
-        Returns if x is feasible.
-        """
-        raise NotImplementedError
-
-    def value(self, x: torch.Tensor):
-        raise NotImplementedError
-
-    def gradient(self, x: torch.Tensor):
-        raise NotImplementedError
-
     def inverse_gradient(self, y: torch.Tensor):
+        """
+        Returns a point `x` such that `y` coincides with
+        `gradient(x)` i.e., the evaluation of the
+        inverse map of the gradient at `y`.
+        Used in mirror methods.
+        """
         raise NotImplementedError
 
     def hessian(self, x: torch.Tensor):
-        raise NotImplementedError
-
-    def sample_uniform(self, n_points: int):
+        """
+        Returns the Hessian of the barrier function
+        evaluated at `x`. Used in natural methods.
+        """
         raise NotImplementedError
 
     def boundary_to_interior_half(self, x: torch.Tensor):
+        """
+        For certain domains, this returns if `x` belongs in
+        a certain subset of the domain that is half the size
+        of the original domain.
+        """
         raise NotImplementedError
 
 
@@ -163,12 +167,6 @@ class BoxBarrier(Barrier):
         output = 2 * reci_diff + 4 * torch.square(x * reci_diff)
         return output.clamp_max_(1e07)
 
-    def sample_uniform(self, n_points: int):
-        """
-        Sampling points uniformly from a box
-        """
-        return torch.rand(n_points, self.dimension) * (2 * self.bounds) - self.bounds
-
     def boundary_to_interior_half(self, x: torch.Tensor):
         """
         Returns if x belongs in the region between the
@@ -182,7 +180,10 @@ class BoxBarrier(Barrier):
 
 class EllipsoidBarrier(Barrier):
     """
-    Log barrier for Ellipsoid
+    Log barrier for Ellipsoid of the form `<x, Mx> <= 1`
+    where `M` is a `d x d` positive definite matrix.
+    `M` is passed in terms of its eigendecomposition to
+    facilitate faster computation.
     """
 
     def __init__(self, ellipsoid: Dict[str, torch.Tensor]):
@@ -289,26 +290,6 @@ class EllipsoidBarrier(Barrier):
         ULUT = torch.einsum("...ij,jk->...ik", U * scaled_L, U.T)
         return ULUT + scaled_Ax.unsqueeze(dim=-1) * scaled_Ax.unsqueeze(dim=-2)
 
-    def sample_uniform(self, n_points: int):
-        """
-        Sampling points uniformly from an ellipsoid.
-        This is just rejection sampling, so is very inefficient in higher dimensions
-        volume of cuboid with side lengths [2/a_{i}]_{i = 1}^{d} is 2^{d} / prod([a_{i}]_{i = 1}^{d})
-        volume of ellipsoid with axis lengths [1/a_{i}] is pi / prod([a_{i}]^{i = 1}^{d})
-        So there's a pi /2^{d} chance that a point sampled within a cuboid lies in the ellipsoid
-        """
-        dimension = self.ellipsoid["eigvals"].shape[0]
-        fraction = 2**dimension / torch.pi
-        all_points = torch.empty(0, dimension)
-        while all_points.shape[0] < n_points:
-            # a little excess just in case
-            points = torch.rand(int(1.1 * fraction * n_points), dimension) * 2 - 1
-            points = torch.einsum("ij,...i->...j", self.ellipsoid["rot"], points)
-            points = points * torch.sqrt(self.ellipsoid["eigvals"])
-            feasible = self.feasibility(points)
-            all_points = torch.vstack([all_points, points[feasible]])
-        return all_points[:n_points]
-
     def boundary_to_interior_half(self, x: torch.Tensor):
         """
         Returns if x belongs in the region between the
@@ -320,7 +301,10 @@ class EllipsoidBarrier(Barrier):
 
 class SimplexBarrier(Barrier):
     """
-    Log barrier for Simplex
+    Log barrier for simplex in (d + 1) dimensions with a dimension d
+    parameterisation as defined below
+
+    \phi(x) = -\sum_{i=1}^{d}\log(x_{i}) - \log(1 - \sum_{i=1}^{d}x_{i})
     """
 
     def __init__(self, dimension: int):
@@ -384,14 +368,29 @@ class SimplexBarrier(Barrier):
 
 class PolytopeBarrier(Barrier):
     """
-    Log barrier for Polytope
+    Log barrier for Polytope of the form Ax <= b, where
+    `A` is a `m x d` matrix and `b` is a `m` length vector.
+    Optionally, this also accepts constant weights per constraint
+    which results in the formula for the barrier below.
+
+    \phi(x) = -\sum_{i=1}^{m} w_{i} \log(b_{i} - <A_{i}, x>)
+
+    If weights are not passed, then they are assumed to be 1.
     """
 
-    def __init__(self, polytope: Dict[str, torch.Tensor]):
+    def __init__(
+        self, polytope: Dict[str, torch.Tensor], weights: Optional[torch.Tensor] = None
+    ):
         self.polytope = polytope
         self.dimension = polytope["A"].shape[-1]
         if len(polytope["A"].shape) == 1:  # diagonal A
             self.diag_hess = True
+        if weights is not None and weights.shape != polytope["b"].shape:
+            raise ValueError(
+                "If weights is passed, then it should be "
+                "the same length as the number of constraints"
+            )
+        self.weights = weights
 
     def _Ax(self, x: torch.Tensor):
         # functionality to compute Ax for batch of x
@@ -411,10 +410,15 @@ class PolytopeBarrier(Barrier):
         )
 
     def value(self, x: torch.Tensor):
-        return -torch.sum(torch.log(self._safe_slack(x)), dim=-1)
+        value_vector = torch.log(self._safe_slack(x))
+        if self.weights is not None:
+            value_vector.mul_(self.weights)
+        return -torch.sum(value_vector, dim=-1)
 
     def gradient(self, x: torch.Tensor):
         slack = self._safe_slack(x)  # [b - aTx]
+        if self.weights is not None:
+            slack.div_(self.weights)
         if not self.diag_hess:
             return torch.sum(self.polytope["A"] / slack.unsqueeze(-1), dim=-2)
         else:
@@ -422,6 +426,8 @@ class PolytopeBarrier(Barrier):
 
     def hessian(self, x: torch.Tensor):
         slack = self._safe_slack(x)  # [b - aTx]
+        if self.weights is not None:
+            slack.div_(self.weights.sqrt())
         if not self.diag_hess:
             component = self.polytope["A"] / slack.unsqueeze(-1)  # shape n x m x d
             # component.unsqueeze(-1) * component.unsqueeze(-2) is of shape n x m x d x d

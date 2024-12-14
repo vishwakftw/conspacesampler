@@ -2,7 +2,7 @@ import torch
 
 torch.set_default_dtype(torch.float64)
 
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 __all__ = [
     "Potential",
@@ -21,6 +21,9 @@ class Potential:
     def __init__(self, *args, **kwargs):
         pass
 
+    def feasibility(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
     def value(self, x: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
@@ -28,12 +31,12 @@ class Potential:
         raise NotImplementedError
 
     def value_and_gradient(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        raise NotImplementedError
+        return self.value(x), self.gradient(x)
 
 
 class SumPotential(Potential):
     """
-    Functionality to compose a list of barriers
+    Functionality to sum a list of potentials
     """
 
     def __init__(
@@ -104,28 +107,6 @@ class DirichletPotential(Potential):
         )
         grad = -self._main_alpha / x + self._last_alpha / slack
         return val, grad
-
-
-class GammaPotential(Potential):
-    """
-    Gamma Potential
-    """
-
-    def __init__(self, alpha: torch.Tensor, lambd: torch.Tensor):
-        self.alpha = alpha
-        self.lambd = lambd
-        self.dimension = alpha.shape[0]
-        if alpha.shape[0] != lambd.shape[0]:
-            raise ValueError("alpha and lambd have to be have the same length")
-
-    def value(self, x: torch.Tensor):
-        return torch.sum(-torch.log(x) * self.alpha + x * self.lambd, dim=-1)
-
-    def gradient(self, x: torch.Tensor):
-        return -self.alpha / x + self.lambd
-
-    def value_and_gradient(self, x: torch.Tensor):
-        return self.value(x), self.gradient(x)
 
 
 class BayesianLogisticRegressionPotential(Potential):

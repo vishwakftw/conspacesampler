@@ -79,12 +79,23 @@ def ot_distance(points_a: torch.Tensor, points_b: torch.Tensor, bias: float) -> 
 
 
 def energy_distance(points_a: torch.Tensor, points_b: torch.Tensor) -> torch.Tensor:
-    Na = points_a.shape[0]
-    Nb = points_b.shape[0]
     A = torch.cdist(x1=points_a, x2=points_b, p=2).mean(dim=(-1, -2))
     B = torch.cdist(x1=points_a, x2=points_a, p=2).mean(dim=(-1, -2))
     C = torch.cdist(x1=points_b, x2=points_b, p=2).mean(dim=(-1, -2))
     return 2 * A - B - C
+
+
+def kstest_statistic(cdf_vals: torch.Tensor) -> torch.Tensor:
+    # Computes both D+, D- in the KSTest
+    # as implemented in scipy.stats
+    # cdf_vals: ... x N x D
+    N = cdf_vals.shape[-2]
+    ecdf = torch.arange(1, N + 1) / N  # 1 / N to 1 (upper)
+    dplus = torch.max(ecdf.unsqueeze(-1) - cdf_vals, dim=-2).values
+    ecdf.sub_(1 / N)  # 0 to (N - 1) / N (lower)
+    dminus = torch.max(cdf_vals - ecdf.unsqueeze(-1), dim=-2).values
+    d = torch.maximum(dplus, dminus)
+    return d.max(dim=-1).values  # sum across dimensions
 
 
 def define_ellipsoid(
