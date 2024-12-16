@@ -1,3 +1,4 @@
+import scipy.stats as sts
 import torch
 
 torch.set_default_dtype(torch.float64)
@@ -11,7 +12,9 @@ from conspacesampler.utils import (
     compute_bounds_ellipsoid,
     define_box,
     define_ellipsoid,
+    kstest_statistic,
 )
+from functools import partial
 
 
 class TestComputeBounds(unittest.TestCase):
@@ -86,6 +89,53 @@ class TestComputeBounds(unittest.TestCase):
                     torch.all(ellipsoidbarrier.feasibility(x + rhighe * u)),
                     "Infeasible bounds",
                 )
+
+
+class TestKSTestStatistic(unittest.TestCase):
+    def test_gaussian(self):
+        dimensions = [5, 7, 11]
+
+        for dim in dimensions:
+            mu, sigma = torch.rand(dim) * 4 - 2, torch.rand(dim) * 1.5 + 0.5
+            vals = torch.randn(3, 19, dim) * sigma + mu
+            # first batch dimension is NOT gaussian
+            # second and third batch dimensions are gaussian
+            vals[0] = torch.rand(19, dim) * (2 * sigma) + (mu - sigma)
+            vals = vals.sort(dim=-2).values
+            cdf_vals = torch.distributions.Normal(loc=mu, scale=sigma).cdf(vals)
+            actual = kstest_statistic(cdf_vals=cdf_vals, reduce_max=False)
+            for b in range(3):
+                for i, (mu_i, sigma_i) in enumerate(zip(mu.numpy(), sigma.numpy())):
+                    exp_i = sts.ks_1samp(
+                        vals[b, :, i].numpy(), cdf=sts.norm.cdf, args=(mu_i, sigma_i)
+                    )
+                    self.assertTrue(
+                        torch.allclose(actual[b, i], torch.tensor(exp_i.statistic))
+                    )
+
+    def test_gamma(self):
+        dimensions = [5, 7, 11]
+
+        for dim in dimensions:
+            conc, rate = torch.rand(dim) * 3, torch.rand(dim) * 4
+            gamma_dist = torch.distributions.Gamma(concentration=conc, rate=rate)
+            vals = gamma_dist.sample((3, 19))
+            # first batch dimension is NOT gamma
+            # second and third batch dimensions are gamma
+            vals[0] = torch.rand(19, dim) * 2 * (conc / rate)
+            vals = vals.sort(dim=-2).values
+            cdf_vals = gamma_dist.cdf(vals)
+            actual = kstest_statistic(cdf_vals=cdf_vals, reduce_max=False)
+            for b in range(3):
+                for i, (conc_i, rate_i) in enumerate(zip(conc.numpy(), rate.numpy())):
+                    exp_i = sts.ks_1samp(
+                        vals[b, :, i].numpy(),
+                        cdf=sts.gamma.cdf,
+                        args=(conc_i, 0, 1 / rate_i),
+                    )
+                    self.assertTrue(
+                        torch.allclose(actual[b, i], torch.tensor(exp_i.statistic))
+                    )
 
 
 if __name__ == "__main__":
