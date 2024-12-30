@@ -1,5 +1,9 @@
 ### How to use these scripts?
 
+First, install the package `conspacesampler` using `pip install .` from the topmost directory containing `setup.py`.
+
+Semantics of individual scripts are detailed below.
+
 ##### Script 1
 
 ```bash
@@ -117,3 +121,21 @@ This will create 3 CSV files in the current directory, which are
         10. `q75`: third quartile (or 0.75-quantile) of the absolute error (normalised by dimension) between the `<N>` particles to the ground truth.
 
 Passing "NA" or not passing arguments to either `--error_progress_file` or `--error_quantile_file` will result in the error or quantile files respectively not being created.
+
+---
+
+These are the relevant scripts to reproduce the figures in the paper: [High-accuracy sampling from constrained spaces with the Metropolis-adjusted Preconditioned Langevin Algorithm](https://arxiv.org/abs/2412.18701).
+
+##### Citation
+
+```
+@misc{srinivasan2024high,
+      title={High-accuracy sampling from constrained spaces with the Metropolis-adjusted Preconditioned Langevin Algorithm}, 
+      author={Vishwak Srinivasan and Andre Wibisono and Ashia Wilson},
+      year={2024},
+      eprint={2412.18701},
+      archivePrefix={arXiv},
+      primaryClass={stat.CO},
+      url={https://arxiv.org/abs/2412.18701}, 
+}
+```

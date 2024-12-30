@@ -12,9 +12,9 @@ from conspacesampler.utils import (
     compute_bounds_ellipsoid,
     define_box,
     define_ellipsoid,
+    energy_distance,
     kstest_statistic,
 )
-from functools import partial
 
 
 class TestComputeBounds(unittest.TestCase):
@@ -136,6 +136,28 @@ class TestKSTestStatistic(unittest.TestCase):
                     self.assertTrue(
                         torch.allclose(actual[b, i], torch.tensor(exp_i.statistic))
                     )
+
+
+class TestEnergyDistance(unittest.TestCase):
+    def test_edstat(self):
+        dimensions = [3, 5, 7, 11]
+        for dim in dimensions:
+            x = torch.randn(17, 53, dim)
+
+            # ed of x with itself is 0
+            self.assertTrue(torch.allclose(energy_distance(x, x), torch.tensor(0.0)))
+
+            # test batching behaviour
+            y = torch.randn(17, 59, dim)
+            ED = energy_distance(x, y)
+            for b in range(17):
+                self.assertTrue(torch.allclose(ED[b], energy_distance(x[b], y[b])))
+
+            # test batching behaviour with broadcasting
+            y = torch.randn(59, dim)
+            ED = energy_distance(x, y)
+            for b in range(17):
+                self.assertTrue(torch.allclose(ED[b], energy_distance(x[b], y)))
 
 
 if __name__ == "__main__":
