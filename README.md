@@ -19,7 +19,7 @@ from conspacesampler import algorithms, barriers
 barrier = barriers.BoxBarrier(bounds=torch.tensor([0.01, 1]))
 
 # Define the sampler instance, with number of samples = 500
-sampler = algorithms.uniform_samplers.HitAndRunSampler(
+sampler = algorithms.misc_algorithms.HitAndRunSampler(
     barrier=barrier,
     num_samples=500
 )

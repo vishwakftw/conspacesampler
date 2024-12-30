@@ -159,3 +159,29 @@ class LinearPotential(Potential):
 
     def gradient(self, x: torch.Tensor):
         return self.sigma.expand_as(x)
+
+
+class QuadraticPotential(Potential):
+    """
+    Quadratic potential
+    """
+
+    def __init__(self, Q: torch.Tensor, r: torch.Tensor):
+        # potential of the form
+        # 0.5 * <x, Qx> - <r, x>
+        self.Q = Q
+        self.r = r
+
+    def value(self, x: torch.Tensor):
+        xQx = torch.einsum("...j,...i,ij->...", x, x, self.Q)
+        rx = torch.sum(self.r * x, dim=-1)
+        return 0.5 * xQx - rx
+
+    def gradient(self, x: torch.Tensor):
+        return torch.einsum("...j,ij->...i", x, self.Q) - self.r
+
+    def value_and_gradient(self, x):
+        Qx = torch.einsum("...j,ij->...i", x, self.Q)
+        val = 0.5 * torch.sum(x * Qx, dim=-1) - torch.sum(self.r * x, dim=-1)
+        grad = Qx - self.r
+        return val, grad
