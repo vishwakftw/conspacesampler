@@ -221,6 +221,47 @@ def compute_bounds_ellipsoid(
     return rlow.unsqueeze_(dim=-1) + correction, rhigh.unsqueeze_(dim=-1) - correction
 
 
+def compute_bounds_general(
+    barrier: Barrier,
+    particles: torch.Tensor,
+    directions: torch.Tensor,
+    tolerance: float = 1e-08,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    # upper_bound and lower_bound contain 2 values for each particle.
+    # Let `s` = +1 for upper_bound, and -1 for lower_bound.
+    # The first value in either indicates the smallest power `c_out` of 2
+    # such that x + s * 2^c_out * v escapes the domain.
+    # The second value is 0.
+    upper_bound = torch.zeros(2, *particles.shape[:-1])
+    upper_bound[0] += 1
+    lower_bound = torch.zeros(2, *particles.shape[:-1])
+    lower_bound[0] -= 1
+
+    for b in [lower_bound, upper_bound]:
+        scale = barrier.feasibility(particles + b[0].unsqueeze(-1) * directions) + 1.0
+        while torch.any(scale == 2):
+            b[0] = b[0] * scale
+            # if the point is feasible, the scale is 2
+            # if the point is infeasible, the scale is 1
+            scale = (
+                barrier.feasibility(particles + b[0].unsqueeze(-1) * directions) + 1.0
+            )
+
+    # now we perform a binary search to find the limits
+    # note that the value of upper_bound or lower_bound
+    # lies in between 0 and 2^c_out.
+    for b in [lower_bound, upper_bound]:
+        while not torch.allclose(b[0], b[1], atol=tolerance, rtol=0.0):
+            mid = (b[0] + b[1]) / 2
+            feas = barrier.feasibility(particles + mid.unsqueeze(-1) * directions)
+            # if the midpoint is infeasible, then update the c_out
+            b[0] = b[0] * feas + mid * (~feas)
+            # if the midpoint is feasible, then update the c_in
+            b[1] = b[1] * (~feas) + mid * feas
+
+    return lower_bound[1].unsqueeze(-1), upper_bound[1].unsqueeze(-1)
+
+
 def draw_ellipsoid_boundary(ellipsoid, ax=None):
     # only for 2-D
     theta = np.arange(0, 360)

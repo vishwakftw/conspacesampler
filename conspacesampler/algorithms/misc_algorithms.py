@@ -23,6 +23,15 @@ __all__ = ["HitAndRunSampler", "PolytopeTruncGaussian"]
 
 
 class HitAndRunSampler:
+    """
+    The Hit-And-Run sampler for sampling uniformly
+    at random from a given convex domain.
+
+    References:
+    - R.L.Smith, Efficient Monte Carlo procedures for generating points
+      uniformly distributed over bounded regions, 1994.
+    """
+
     def __init__(
         self,
         barrier: Barrier,

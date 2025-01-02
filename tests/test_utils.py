@@ -10,6 +10,7 @@ from conspacesampler.utils import (
     compute_bounds_box,
     compute_bounds_polytope,
     compute_bounds_ellipsoid,
+    compute_bounds_general,
     define_box,
     define_ellipsoid,
     energy_distance,
@@ -38,25 +39,28 @@ class TestComputeBounds(unittest.TestCase):
                 rlowp, rhighp = compute_bounds_polytope(
                     barrier=polytopebarrier, particles=x, directions=u
                 )
-                self.assertTrue(
-                    torch.allclose(rlowb, rlowp),
-                    "Polytope lower bounds and box lower bounds don't agree: "
-                    f"max error: {torch.max(torch.abs(rlowb - rlowp))}",
+                rlowg, rhighg = compute_bounds_general(
+                    barrier=boxbarrier,
+                    particles=x,
+                    directions=u,
                 )
-                self.assertTrue(
-                    torch.allclose(rhighb, rhighp),
-                    "Polytope lower bounds and box upper bounds don't agree: "
-                    f"max error: {torch.max(torch.abs(rhighb - rhighp))}",
-                )
-
-                self.assertTrue(
-                    torch.all(boxbarrier.feasibility(x + rlowb * u)),
-                    "Infeasible bounds",
-                )
-                self.assertTrue(
-                    torch.all(boxbarrier.feasibility(x + rhighb * u)),
-                    "Infeasible bounds",
-                )
+                for bb, bp, bg in zip(
+                    [rlowb, rhighb], [rlowp, rhighp], [rlowg, rhighg]
+                ):
+                    self.assertTrue(
+                        torch.all(boxbarrier.feasibility(x + bb * u)),
+                        "Infeasible bounds",
+                    )
+                    self.assertTrue(
+                        torch.allclose(bb, bp),
+                        "Polytope bounds and box bounds don't agree: "
+                        f"max error: {torch.max(torch.abs(bb - bp))}",
+                    )
+                    self.assertTrue(
+                        torch.allclose(bb, bg),
+                        "Box bounds and general bounds don't agree: "
+                        f"max error: {torch.max(torch.abs(bb - bg))}",
+                    )
 
     def test_ellipsoid(self):
         dimensions = [3, 5, 7, 11]
@@ -81,14 +85,20 @@ class TestComputeBounds(unittest.TestCase):
                 rlowe, rhighe = compute_bounds_ellipsoid(
                     barrier=ellipsoidbarrier, particles=x, directions=u
                 )
-                self.assertTrue(
-                    torch.all(ellipsoidbarrier.feasibility(x + rlowe * u)),
-                    "Infeasible bounds",
+                rlowe_gen, rhighe_gen = compute_bounds_general(
+                    barrier=ellipsoidbarrier, particles=x, directions=u
                 )
-                self.assertTrue(
-                    torch.all(ellipsoidbarrier.feasibility(x + rhighe * u)),
-                    "Infeasible bounds",
-                )
+
+                for b, b_gen in zip([rlowe, rhighe], [rlowe_gen, rhighe_gen]):
+                    self.assertTrue(
+                        torch.all(ellipsoidbarrier.feasibility(x + b * u)),
+                        "Infeasible bounds",
+                    )
+                    self.assertTrue(
+                        torch.allclose(b, b_gen, atol=1e-07),
+                        "Ellipsoid bounds and general bounds don't agree: "
+                        f"max error: {torch.max(torch.abs(b - b_gen))}",
+                    )
 
 
 class TestKSTestStatistic(unittest.TestCase):
